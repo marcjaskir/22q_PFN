@@ -3,9 +3,6 @@
 ### Description
 Differences in functional neuroanatomy are related to variability in aspects of cognition affected by psychopathology. Individuals exhibit unique spatial profiles for the same functional network (e.g. default mode, visual, and limbic networks), and new machine learning tools for defining personalized functional networks (PFNs) allow for rigorous spatial comparisons of networks across individuals and groups. In this project, we use PFNs to compare network organization in a sample of 22q11.2 deletion syndrome patients relative to a large sample of healthy controls from the Philadelphia Neurodevelopmental Cohort (PNC)
 
-### Project Lead
-Marc Jaskir
-
 ### Faculty Lead
 Aaron Alexander-Bloch
 
