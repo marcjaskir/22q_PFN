@@ -1,0 +1,203 @@
+---
+title: "Average and threshold motion for 22q and PNC subjects"
+author: "Marc Jaskir"
+date: "1/22/2023"
+output: 
+  html_document: 
+    toc: yes
+---
+
+## Load demographics and list files containing motion data
+```{r}
+rm(list=ls())
+
+setwd('/Users/mjaskir/ngg/rotations/alexanderbloch/22q/data/motion/22q/')
+file_list_22q = list.files(pattern="*.tsv")
+
+setwd('/Users/mjaskir/ngg/rotations/alexanderbloch/22q/data/motion/pnc/')
+file_list_pnc = list.files(pattern="*.tsv")
+
+# Load in data frame without motion (to reference subject lists)
+demo_22q_no_motion <- read.csv('/Users/mjaskir/ngg/rotations/alexanderbloch/22q/data/demographics/22q/demo_22q_NO_MOTION.csv')
+demo_pnc_no_motion <- read.csv('/Users/mjaskir/ngg/rotations/alexanderbloch/22q/data/demographics/pnc/demo_pnc_NO_MOTION.csv')
+```
+
+## Exclude data for unused or incomplete 22q subjects/sessions
+```{r}
+# Cross-reference motion files with 22q demographics dataset
+file_list_22q_clean <- c()
+for (file in file_list_22q) {
+  sub <- strsplit(file,'_')[[1]][1]
+  if (sub %in% demo_22q_no_motion$sub) {
+    file_list_22q_clean <- c(file_list_22q_clean, file)
+  }
+}
+```
+
+Check which 22q subjects have an unusual number (!= 2) of functional scans
+```{r}
+skip_indices <- c()
+for (sub_22q in demo_22q_no_motion$sub) {
+  func_scans <- file_list_22q_clean[grep(sub_22q, file_list_22q_clean)]
+  if (length(func_scans) != 2) {
+    skip_indices <- c(skip_indices, which(file_list_22q_clean %in% func_scans))
+    print(func_scans)
+  }
+}
+```
+
+Excluding sub-016095 ses-008971 (this extra session was previously identified as missing resting state)
+```{r}
+file_list_22q_clean <- file_list_22q_clean[-skip_indices[3]]
+```
+
+## Exclude data for unused or incomplete PNC subjects/sessions
+```{r}
+file_list_pnc_clean <- c()
+for (file in file_list_pnc) {
+  sub <- strsplit(file,'_')[[1]][1]
+  if (sub %in% demo_pnc_no_motion$sub) {
+    file_list_pnc_clean <- c(file_list_pnc_clean, file)
+  }
+}
+```
+
+Check which PNC subjects have an unusual number (!= 2) of functional scans
+```{r}
+skip_indices <- c()
+for (sub_pnc in demo_pnc_no_motion$sub) {
+  func_scans <- file_list_pnc_clean[grep(sub_pnc, file_list_pnc_clean)]
+  if (length(func_scans) != 2) {
+    skip_indices <- c(skip_indices, which(file_list_pnc_clean %in% func_scans))
+    print(func_scans)
+  }
+}
+```
+
+Seems like every subject has 2 functional scans - here's another sanity check
+```{r}
+pnc_fnames_abbrev <- c()
+for (file in file_list_pnc_clean) {
+  fname_parsed <- strsplit(file,'_')
+  if (fname_parsed[[1]][3] == 'task-idemo') {
+    pnc_fnames_abbrev <- c(pnc_fnames_abbrev, paste0(fname_parsed[[1]][3], '_', fname_parsed[[1]][4], '_', fname_parsed[[1]][5], '_', fname_parsed[[1]][6], '_', fname_parsed[[1]][7])) 
+  } else if (fname_parsed[[1]][3] == 'task-rest') {
+    pnc_fnames_abbrev <- c(pnc_fnames_abbrev, paste0(fname_parsed[[1]][3], '_', fname_parsed[[1]][4], '_', fname_parsed[[1]][5], '_', fname_parsed[[1]][6], '_', fname_parsed[[1]][7], '_', fname_parsed[[1]][8])) 
+  }
+}
+table(pnc_fnames_abbrev)
+```
+
+- Looks good!
+
+## Load motion data
+```{r}
+setwd('/Users/mjaskir/ngg/rotations/alexanderbloch/22q/data/motion/22q/')
+files_22q = lapply(file_list_22q_clean, read.delim, header=FALSE)
+names(files_22q) <- file_list_22q_clean
+
+setwd('/Users/mjaskir/ngg/rotations/alexanderbloch/22q/data/motion/pnc/')
+files_pnc = lapply(file_list_pnc_clean, read.delim, header=FALSE)
+names(files_pnc) <- file_list_pnc_clean
+```
+
+## Compute mean FD for each scan
+```{r}
+meanFD_summary_22q <- matrix(nrow=length(files_22q),ncol=4)
+for (files in names(files_22q)) {
+  sub <- strsplit(files,'_')[[1]][1]
+  ses <- strsplit(files,'_')[[1]][2]
+  scan <- strsplit(files,'_')[[1]][3]
+  meanFD <- mean(as.numeric(unlist(files_22q[files])))
+  meanFD_summary_22q[which(names(files_22q) == files),] <- c(sub,ses,scan,meanFD)
+}
+meanFD_summary_22q <- as.data.frame(meanFD_summary_22q)
+colnames(meanFD_summary_22q) <- c('sub','ses','scan','meanFD')
+meanFD_summary_22q$meanFD <- as.numeric(meanFD_summary_22q$meanFD)
+
+meanFD_summary_pnc <- matrix(nrow=length(files_pnc),ncol=4)
+for (files in names(files_pnc)) {
+  sub <- strsplit(files,'_')[[1]][1]
+  ses <- strsplit(files,'_')[[1]][2]
+  scan <- strsplit(files,'_')[[1]][3]
+  meanFD <- mean(as.numeric(unlist(files_pnc[files])))
+  meanFD_summary_pnc[which(names(files_pnc) == files),] <- c(sub,ses,scan,meanFD)
+}
+meanFD_summary_pnc <- as.data.frame(meanFD_summary_pnc)
+colnames(meanFD_summary_pnc) <- c('sub','ses','scan','meanFD')
+meanFD_summary_pnc$meanFD <- as.numeric(meanFD_summary_pnc$meanFD)
+```
+
+## Exclude high-motion subjects
+Only include subjects for which both scans have mean FD < 0.7, since Cornblath et al 2021 (same 22q sample) set motion threshold at 0.7
+```{r}
+high_motion_subs_22q <- c()
+for (scan in 1:nrow(meanFD_summary_22q)) {
+  scan_data <- meanFD_summary_22q[scan,]
+  if (scan_data$meanFD >= 0.7) {
+    high_motion_subs_22q <- c(high_motion_subs_22q, scan_data$sub)
+  }
+}
+
+meanFD_summary_22q <- meanFD_summary_22q[! meanFD_summary_22q$sub %in% high_motion_subs_22q,]
+
+high_motion_subs_pnc <- c()
+for (scan in 1:nrow(meanFD_summary_pnc)) {
+  scan_data <- meanFD_summary_pnc[scan,]
+  if (scan_data$meanFD >= 0.7) {
+    high_motion_subs_pnc <- c(high_motion_subs_pnc, scan_data$sub)
+  }
+}
+
+meanFD_summary_pnc <- meanFD_summary_pnc[! meanFD_summary_pnc$sub %in% high_motion_subs_pnc,]
+```
+
+## Average motion data within subjects
+```{r}
+# 22q
+meanFD_summary_22q_sublevel <- matrix(nrow=length(unique(meanFD_summary_22q$sub)),ncol=2)
+row <- 1
+for (subs in unique(meanFD_summary_22q$sub)) {
+  sub_data <- meanFD_summary_22q[meanFD_summary_22q$sub==subs,]
+  sub_meanFD <- mean(sub_data$meanFD)
+  meanFD_summary_22q_sublevel[row,] <- c(subs,sub_meanFD)
+  row <- row + 1
+}
+meanFD_summary_22q_sublevel <- as.data.frame(meanFD_summary_22q_sublevel)
+colnames(meanFD_summary_22q_sublevel) <- c('sub','meanFD')
+
+# pnc
+meanFD_summary_pnc_sublevel <- matrix(nrow=length(unique(meanFD_summary_pnc$sub)),ncol=2)
+row <- 1
+for (subs in unique(meanFD_summary_pnc$sub)) {
+  sub_data <- meanFD_summary_pnc[meanFD_summary_pnc$sub==subs,]
+  sub_meanFD <- mean(sub_data$meanFD)
+  meanFD_summary_pnc_sublevel[row,] <- c(subs,sub_meanFD)
+  row <- row + 1
+}
+meanFD_summary_pnc_sublevel <- as.data.frame(meanFD_summary_pnc_sublevel)
+colnames(meanFD_summary_pnc_sublevel) <- c('sub','meanFD')
+```
+
+## Merge motion data into demographic datasets
+```{r}
+demo_22q <- merge(demo_22q_no_motion,meanFD_summary_22q_sublevel,by.x = 'sub', by.y='sub', all.y=TRUE)
+demo_pnc <- merge(demo_pnc_no_motion,meanFD_summary_pnc_sublevel,by.x = 'sub', by.y='sub', all.y=TRUE)
+```
+
+
+## Save updated demographics and subject lists
+```{r}
+# Save demographics file
+write.table(demo_22q, '/Users/mjaskir/ngg/rotations/alexanderbloch/22q/data/demographics/22q/demo_22q.csv',sep=',',row.names = FALSE)
+write.table(demo_pnc, '/Users/mjaskir/ngg/rotations/alexanderbloch/22q/data/demographics/pnc/demo_pnc.csv',sep=',',row.names = FALSE)
+
+# Create output directories
+dir.create("/Users/mjaskir/ngg/rotations/alexanderbloch/22q/data/subject_lists/22q", showWarnings = FALSE, recursive = TRUE)
+dir.create("/Users/mjaskir/ngg/rotations/alexanderbloch/22q/data/subject_lists/pnc", showWarnings = FALSE, recursive = TRUE)
+
+# Save final subject lists
+write.table(demo_22q$sub, '/Users/mjaskir/ngg/rotations/alexanderbloch/22q/data/subject_lists/22q/subject_list_22q.csv',sep=',',row.names = FALSE, col.names = FALSE)
+write.table(demo_pnc$sub, '/Users/mjaskir/ngg/rotations/alexanderbloch/22q/data/subject_lists/pnc/subject_list_pnc.csv',sep=',',row.names = FALSE, col.names = FALSE)
+```
+

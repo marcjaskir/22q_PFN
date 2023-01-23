@@ -1,0 +1,270 @@
+---
+title: "Clean 22q and PNC demographics"
+author: "Marc Jaskir"
+date: "1/22/2023"
+output: 
+  html_document: 
+    toc: yes
+---
+
+## Load data
+```{r}
+rm(list=ls())
+
+### DEMOGRAPHICS ###
+
+# Load PNC-specific demographics
+# source: Sydney Covitz
+demo_pnc_all <- read.table('/Users/mjaskir/ngg/rotations/alexanderbloch/22q/data/demographics/pnc/raw/pnc_participants.tsv', sep='\t', header=TRUE)
+
+# Load demographics by BBLID, which includes 22q subjects
+# Source: /data/secure/bit_dwh/oracle/subject.csv; dataset was manually scrubbed of PII
+demo_bbl_all <- read.table('/Users/mjaskir/ngg/rotations/alexanderbloch/22q/data/demographics/22q/raw/subject_scrubbed.csv', sep=',', header=TRUE, fill=TRUE)
+
+### COMPLETENESS ###
+
+# Load list of 22q subjects with at least T1, fmap, idemo, rest
+# Source: /cbica/projects/bbl_22q/data/derivatives/xcpd/xcp_abcd/xcpd_completeness
+sublist_22q <- read.table('/Users/mjaskir/ngg/rotations/alexanderbloch/22q/data/completeness/22q/xcpd/xcpd_completeness_fmaps_and_func_22q.txt', header=FALSE)
+
+# Load number of volumes per 22q functional scan
+# Source: /cbica/projects/bbl_22q/data/derivatives/xcpd/xcp_abcd/xcpd_completeness
+nvols_22q <- read.table('/Users/mjaskir/ngg/rotations/alexanderbloch/22q/data/completeness/22q/xcpd/xcpd_completeness_nvols_22q.csv', sep=',',header = TRUE)
+
+# Load list of PNC subjects with at least T1, fmap, idemo, rest
+# Source: /cbica/projects/bbl_22q/data/derivatives/pnc/xcp_abcd/xcpd_completeness
+sublist_pnc <- read.table('/Users/mjaskir/ngg/rotations/alexanderbloch/22q/data/completeness/pnc/xcpd/xcpd_completeness_fmaps_and_func_pnc.txt', header=FALSE)
+
+# Load number of volumes per PNC functional scan
+# Source: /cbica/projects/bbl_22q/data/derivatives/pnc/xcp_abcd/xcpd_completeness
+nvols_pnc <- read.table('/Users/mjaskir/ngg/rotations/alexanderbloch/22q/data/completeness/pnc/xcpd/xcpd_completeness_nvols_pnc.csv', sep=',',header = TRUE)
+
+### SCAN DATES (for computing 22q age) ###
+
+# Load 22q scan dates
+# Source: /cbica/projects/bbl_22q/data/derivatives/scan_dates
+scan_dates_22q <- read.table('/Users/mjaskir/ngg/rotations/alexanderbloch/22q/data/scan_dates/22q_scan_dates.csv', sep=',', header=TRUE)
+```
+
+## Perform basic preprocessing
+```{r}
+# Remove sub-016095 ses-008971 (unused, since that session was missing resting state)
+scan_dates_22q <- scan_dates_22q[scan_dates_22q$ses != 'ses-008971',]
+
+# Add variable name
+colnames(sublist_22q) <- 'sub'
+colnames(sublist_pnc) <- 'sub'
+
+# Remove sub-017630, since they are an older relative of sub-017631
+# Reference: /data/secure/bit_repo/projects_repo/22q_chop_bbl_repo/demo_22q.csv
+sublist_22q <- data.frame(sub=sublist_22q[sublist_22q$sub != 'sub-017630',])
+
+# Save original IDs from subject lists
+sublist_22q_orig <- sublist_22q
+sublist_pnc_orig <- sublist_pnc
+
+# Remove sub-* or sub-0* prefixes for uniformity
+demo_pnc_all$participant_id <- gsub('sub-0','',demo_pnc_all$participant_id)
+demo_pnc_all$participant_id <- gsub('sub-','',demo_pnc_all$participant_id)
+sublist_22q$sub <- gsub('sub-0','',sublist_22q$sub)
+sublist_22q$sub <- gsub('sub-','',sublist_22q$sub)
+sublist_pnc$sub <- gsub('sub-0','',sublist_pnc$sub)
+sublist_pnc$sub <- gsub('sub-','',sublist_pnc$sub)
+nvols_22q$sub <- gsub('sub-0','',nvols_22q$sub)
+nvols_22q$sub <- gsub('sub-','',nvols_22q$sub)
+nvols_pnc$sub <- gsub('sub-0','',nvols_pnc$sub)
+nvols_pnc$sub <- gsub('sub-','',nvols_pnc$sub)
+scan_dates_22q$sub <- gsub('sub-0','',scan_dates_22q$sub)
+scan_dates_22q$sub <- gsub('sub-','',scan_dates_22q$sub)
+
+# Remove duplicate rows
+demo_pnc_all <- unique(demo_pnc_all)
+
+# Remove session variable
+scan_dates_22q$ses <- NULL
+
+# Convert to scan dates to date object
+scan_dates_22q$scan_date <- as.Date(scan_dates_22q$scan_date)
+```
+
+## Clean 22q demographics
+```{r}
+# Extract demographics
+demo_22q <- data.frame(matrix(NA, nrow=0,ncol=4))
+for (sub in sublist_22q$sub) {
+  sub_data <- demo_bbl_all[demo_bbl_all$BBLID == sub,]
+  if (nrow(sub_data) == 1) {
+    demo_22q <- rbind(demo_22q, data.frame(sub_data$BBLID, sub_data$SEX, sub_data$DOBIRTH, sub_data$RACE))
+  } else {
+    print(sub)
+  }
+}
+colnames(demo_22q) <- c('sub','sex','dob','race')
+
+# Recode sex variable
+demo_22q$sex <- ifelse(demo_22q$sex == 1, 'Male','Female')
+
+# Recode race variable
+demo_22q$race <- ifelse(demo_22q$race == 1, 'White', ifelse(demo_22q$race == 2, 'Black', ifelse(demo_22q$race == 4, 'Asian', ifelse(demo_22q$race == 5, 'Mixed',NA))))
+
+# Merge in scan dates
+demo_22q <- merge(demo_22q, scan_dates_22q, by.x='sub', by.y='sub', all.x=TRUE)
+
+# Convert date of birth to variable to a date object
+dob_cleaned <- c()
+for (row in 1:nrow(demo_22q)) {
+  
+  # Extract dates
+  row_data <- demo_22q[row,]
+  dob <- row_data$dob
+  
+  # Parse dates
+  dob_parsed <- strsplit(dob,'/')
+  
+  # Extract year
+  dob_year <- dob_parsed[[1]][3]
+  
+  # Check if data is from the 1900s (1923-1999)
+  if (23 <= dob_year & dob_year <= 99) {
+    dob_parsed[[1]][3] <- paste0(19,dob_year)
+    
+  # Check if data is from the 2000s (2000-2022)
+  } else if (dob_year >= 00 & dob_year <= 22) {
+    dob_parsed[[1]][3] <- paste0(20,dob_year)
+    
+  }
+  
+  # Put date back together
+  dob_cleaned <- c(dob_cleaned, paste0(dob_parsed[[1]][1],'/',dob_parsed[[1]][2],'/',dob_parsed[[1]][3]))
+  
+}
+
+# Replace old dates
+demo_22q$dob <- dob_cleaned
+
+# Convert dob to date variable
+demo_22q$dob <- as.Date(demo_22q$dob, format="%m/%d/%Y")
+
+# Define age as difference between DOB & scan date, rounding to nearest year
+demo_22q$age <- round(as.numeric(difftime(demo_22q$scan_date,demo_22q$dob,unit="days")/365.25),digits=0)
+
+# Remove DOB and DOI
+demo_22q$dob <- NULL
+demo_22q$scan_date <- NULL
+
+# Reorder variables
+demo_22q <- demo_22q[,c('sub','sex','age','race')]
+```
+
+## 22q subject exclusions
+Based on 1) non-22q intake status (e.g. psychosis spectrum) and 2) missing volumes in functional time series
+```{r}
+# Update intake status for confirmed 22q subjects whose ISTATUS fields are empty
+# Reference: /data/secure/bit_repo/pi_repo/raquel_gur/22qRO1/demographics_20180912.csv
+demo_bbl_all[demo_bbl_all$BBLID == '17313','ISTATUS'] <- '22q'
+demo_bbl_all[demo_bbl_all$BBLID == '17667','ISTATUS'] <- '22q'
+
+# Exclude subjects on 22q Flywheel whose intake status were not 22q
+intake_status_22q <- demo_bbl_all[demo_bbl_all$ISTATUS == "22q",]
+demo_22q <- demo_22q[demo_22q$sub %in% intake_status_22q$BBLID,]
+
+# Identify 22q subjects with scans that are missing volumes
+nvols_22q <- nvols_22q[nvols_22q$sub %in% demo_22q$sub,]
+subs_missing_vols <- c()
+for (row in 1:nrow(nvols_22q)) {
+  scan_data <- nvols_22q[row,]
+  if (scan_data$scan == "task-idemo") {
+    if (scan_data$nvols != 210) {
+      print(unlist(scan_data, use.names = FALSE))
+      subs_missing_vols <- c(subs_missing_vols, scan_data$sub)
+    }
+  } else if (scan_data$scan == "task-rest") {
+    if (scan_data$nvols != 124) {
+      print(unlist(scan_data, use.names = FALSE))
+      subs_missing_vols <- c(subs_missing_vols, scan_data$sub)
+    }
+  }
+}
+
+# Filter out subjects with scans that are missing volumes
+demo_22q <- demo_22q[! demo_22q$sub %in% subs_missing_vols,]
+```
+
+## PNC subject exclusions
+Based on missing volumes in functional time series
+```{r}
+# Extract demographics
+demo_pnc <- data.frame(matrix(NA, nrow=0,ncol=4))
+for (sub in sublist_pnc$sub) {
+  sub_data <- demo_pnc_all[demo_pnc_all$participant_id == sub,]
+  if (nrow(sub_data) == 1) {
+    demo_pnc <- rbind(demo_pnc, c(data.frame(sub_data$participant_id, sub_data$sex, sub_data$age, sub_data$race)))
+  }
+}
+colnames(demo_pnc) <- c('sub','sex','age','race')
+
+# Identify PNC subjects with scans that are missing volumes
+nvols_pnc <- nvols_pnc[nvols_pnc$sub %in% demo_pnc$sub,]
+subs_missing_vols <- c()
+for (row in 1:nrow(nvols_pnc)) {
+  scan_data <- nvols_pnc[row,]
+  if (scan_data$scan == "task-idemo") {
+    if (scan_data$nvols != 210) {
+      print(unlist(scan_data, use.names = FALSE))
+      subs_missing_vols <- c(subs_missing_vols, scan_data$sub)
+    }
+  } else if (scan_data$scan == "task-rest") {
+    if (scan_data$nvols != 124) {
+      print(unlist(scan_data, use.names = FALSE))
+      subs_missing_vols <- c(subs_missing_vols, scan_data$sub)
+    }
+  }
+}
+
+# Filter out subjects with scans that are missing volumes
+demo_pnc <- demo_pnc[! demo_pnc$sub %in% subs_missing_vols,]
+
+# Match race categories to those present in 22q sample
+demo_pnc <- demo_pnc[demo_pnc$race %in% c('Asian','Black','Mixed','White'),]
+
+# Round age
+demo_pnc$age <- round(demo_pnc$age,digits=0)
+```
+
+# Save demographic data frames (excluding motion)
+```{r}
+### Restore original subject labels
+
+# 22q
+sub_orig_labels <- c()
+for (sub in demo_22q$sub) {
+  orig <- sublist_22q_orig[grep(sub, sublist_22q_orig$sub), ]
+  if (length(orig) == 1) {
+    sub_orig_labels <- c(sub_orig_labels, orig) 
+  } else {
+    print('WARNING: Multiple partial matches')
+  }
+}
+demo_22q$sub <- sub_orig_labels
+
+# PNC
+sub_orig_labels <- c()
+for (sub in demo_pnc$sub) {
+  orig <- sublist_pnc_orig[grep(sub, sublist_pnc_orig$sub), ]
+  if (length(orig) == 1) {
+    sub_orig_labels <- c(sub_orig_labels, orig) 
+  } else {
+    print('WARNING: Multiple partial matches')
+  }
+}
+demo_pnc$sub <- sub_orig_labels
+
+# Create output directories
+dir.create("/Users/mjaskir/ngg/rotations/alexanderbloch/22q/data/demographics/22q", showWarnings = FALSE, recursive = TRUE)
+dir.create("/Users/mjaskir/ngg/rotations/alexanderbloch/22q/data/demographics/pnc", showWarnings = FALSE, recursive = TRUE)
+
+### Save
+write.csv(demo_22q,'/Users/mjaskir/ngg/rotations/alexanderbloch/22q/data/demographics/22q/demo_22q_NO_MOTION.csv', row.names = FALSE)
+write.csv(demo_pnc,'/Users/mjaskir/ngg/rotations/alexanderbloch/22q/data/demographics/pnc/demo_pnc_NO_MOTION.csv', row.names = FALSE)
+```
+

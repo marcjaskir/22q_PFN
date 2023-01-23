@@ -1,0 +1,170 @@
+---
+title: "Match 22q and PNC samples"
+author: "Marc Jaskir"
+date: "1/22/2023"
+output: 
+  html_document: 
+    toc: yes
+---
+
+## Load demographic data
+```{r}
+rm(list=ls())
+
+library(ggplot2)
+library(MatchIt)
+
+demo_22q <- read.csv('/Users/mjaskir/ngg/rotations/alexanderbloch/22q/data/demographics/22q/demo_22q.csv')
+demo_pnc <- read.csv('/Users/mjaskir/ngg/rotations/alexanderbloch/22q/data/demographics/pnc/demo_pnc.csv')
+```
+
+
+## Summary statistics/plots
+```{r}
+# Sex
+print('22q:')
+table(demo_22q$sex)
+print('PNC:')
+table(demo_pnc$sex)
+
+par(mfrow = c(2, 2))
+
+# Age
+hist(demo_22q$age, breaks=seq(from=0, to=50, by=2), xlim=c(0,50), xlab='Age', main='22q')
+hist(demo_pnc$age, breaks=seq(from=0, to=50, by=2), xlim=c(0,50), xlab='Age', main='PNC')
+
+# Motion
+hist(demo_22q$meanFD, breaks=seq(from=0, to=0.7, by=0.025), xlim=c(0,0.7), xlab='Mean Framewise Displacement', main='22q')
+hist(demo_pnc$meanFD, breaks=seq(from=0, to=0.7, by=0.025), xlim=c(0,0.7), xlab='Mean Framewise Displacement', main='PNC')
+
+# Race
+print('22q:')
+table(demo_22q$race)
+print('PNC:')
+table(demo_pnc$race)
+```
+
+Age is an issue - PNC only goes up to age 23
+```{r}
+print('PNC:')
+table(demo_pnc$age)
+```
+
+## Determine age threshold
+Find age threshold at which both samples do not differ significantly by age
+```{r}
+age_thresholds <- c(20:25)
+pvals <- c()
+for (age_threshold in age_thresholds) {
+
+  # Threshold
+  demo_22q_thresholded <- demo_22q[demo_22q$age <= age_threshold,]
+  demo_pnc_thresholded <- demo_pnc[demo_pnc$age <= age_threshold,]
+  
+  # Perform KS test
+  ks_test <- ks.test(demo_22q_thresholded$age, demo_pnc_thresholded$age)
+  
+  pvals <- c(pvals, ks_test$p.value)
+   
+}
+
+# Prevent scientific notation
+options(scipen=999)
+
+# Print p-values for different thresholds
+names(pvals) <- age_thresholds
+print(pvals)
+```
+
+Threshold age for both groups at 21 (n=25 PNC subjects remaining)
+```{r}
+# Threshold
+demo_22q_thresholded <- demo_22q[demo_22q$age <= 21,]
+demo_pnc_thresholded <- demo_pnc[demo_pnc$age <= 21,]
+
+# Save thresholded subject lists
+write.table(demo_22q_thresholded$sub, '/Users/mjaskir/ngg/rotations/alexanderbloch/22q/data/subject_lists/22q/subject_list_22q_thresholded_age-21.csv',sep=',',row.names = FALSE, col.names = FALSE)
+write.table(demo_pnc_thresholded$sub, '/Users/mjaskir/ngg/rotations/alexanderbloch/22q/data/subject_lists/pnc/subject_list_pnc_thresholded_age-21.csv',sep=',',row.names = FALSE, col.names = FALSE)
+```
+
+## Perform matching
+Matching, PNC:22q = 3:1
+```{r}
+# Add group variables
+demo_22q_thresholded$group <- 1
+demo_pnc_thresholded$group <- 0
+
+# Combine datasets
+demo <- rbind(demo_22q_thresholded, demo_pnc_thresholded)
+
+# Recode sex
+demo$sex <- ifelse(demo$sex == "Male", 0, 1)
+
+# Recode race
+demo$race <- ifelse(demo$race == "White", 0, ifelse(demo$race == "Black",1,ifelse(demo$race == "Asian", 2, ifelse(demo$race == "Mixed", 3,NA))))
+
+# Match samples by age, sex, race, and motion
+matching <- matchit(group ~ age + sex + race + meanFD, data=demo, ratio=3)
+
+# Save matched samples to data frame
+matched_samples <- match.data(matching)[1:ncol(demo)]
+matched_samples$group <- ifelse(matched_samples$group == 1, '22q','PNC')
+
+# Save unmatched PNC sample to data frame
+unmatched_sample <- demo_pnc_thresholded[! demo_pnc_thresholded$sub %in% matched_samples$sub,'sub']
+```
+
+## Evaluate matching
+```{r}
+# Print summary
+summary(matching)
+
+# Plot distributions of propensity scores
+plot(matching, type = 'jitter', interactive = FALSE)
+
+# Sex
+print('Sex')
+table(matched_samples$sex, matched_samples$group)
+prop.test(table(matched_samples$sex, matched_samples$group))
+print('=============================')
+
+# Age
+print('Age')
+t.test(matched_samples$age ~ matched_samples$group)
+ggplot(matched_samples, aes(x=age, fill=group)) +
+  geom_density(alpha=0.5) +
+  theme_minimal() +
+  labs(x='Age', y='Density')
+print('=============================')
+
+# Race
+print('Race')
+table(matched_samples$race, matched_samples$group)
+prop.test(table(matched_samples$race, matched_samples$group))
+print('=============================')
+
+# Motion
+print('Motion')
+t.test(matched_samples$meanFD ~ matched_samples$group)
+ggplot(matched_samples, aes(x=meanFD, fill=group)) +
+  geom_density(alpha=0.5) +
+  theme_minimal() +
+  labs(x='Mean Framewise Displacement', y='Density')
+print('=============================')
+```
+
+## Save matched/unmatched subject lists
+```{r}
+# Convert matched/unmatched subject lists to data frames
+matched_22q <- data.frame(sub=matched_samples[matched_samples$group == '22q','sub'])
+matched_pnc <- data.frame(sub=matched_samples[matched_samples$group == 'PNC','sub'])
+unmatched_pnc <- data.frame(sub=unmatched_sample)
+
+# Save subject lists
+write.table(matched_22q,'/Users/mjaskir/ngg/rotations/alexanderbloch/22q/data/subject_lists/22q/subject_list_22q_thresholded_age-21_matched.csv', sep=',', row.names = FALSE, col.names = FALSE)
+write.table(matched_pnc,'/Users/mjaskir/ngg/rotations/alexanderbloch/22q/data/subject_lists/pnc/subject_list_pnc_thresholded_age-21_matched.csv', sep=',', row.names = FALSE, col.names = FALSE)
+write.table(unmatched_pnc,'/Users/mjaskir/ngg/rotations/alexanderbloch/22q/data/subject_lists/pnc/subject_list_pnc_thresholded_age-21_unmatched.csv', sep=',', row.names = FALSE, col.names = FALSE)
+```
+
+
+
